@@ -1,0 +1,249 @@
+Metadata-Version: 2.2
+Name: npc-gym
+Version: 0.1.0
+Summary: Gymnasium-style framework for training hybrid LLM+ML agents through games
+Home-page: https://github.com/cagostino/npc-gym
+Author: Christopher Agostino
+Author-email: 
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.20
+Requires-Dist: npcpy>=1.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: black; extra == "dev"
+Requires-Dist: isort; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Provides-Extra: viz
+Requires-Dist: flask>=2.0; extra == "viz"
+Requires-Dist: plotly>=5.0; extra == "viz"
+Provides-Extra: full
+Requires-Dist: torch>=2.0; extra == "full"
+Requires-Dist: transformers>=4.30; extra == "full"
+Requires-Dist: datasets>=2.0; extra == "full"
+Requires-Dist: trl>=0.7; extra == "full"
+Requires-Dist: peft>=0.5; extra == "full"
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# npc-gym
+
+A Gymnasium-style framework for training hybrid LLM+ML agents through games.
+
+## Overview
+
+npc-gym provides environments and training infrastructure for developing cognitive agents that combine:
+
+- **System 1 (Fast)**: Pattern-matched responses from small fine-tuned models
+- **System 2 (Slow)**: Full LLM reasoning when uncertain
+
+The framework uses game-based training where agents learn through:
+1. Playing games with partial information
+2. Collecting traces (observations, actions, rewards)
+3. Fine-tuning specialized models (DPO, SFT)
+4. Evolving the model genome (genetic selection of best specialists)
+
+## Installation
+
+```bash
+pip install -e .
+
+# With visualization
+pip install -e ".[viz]"
+
+# Full training capabilities
+pip install -e ".[full]"
+```
+
+## Quick Start
+
+```python
+import npc_gym
+from npc_gym.envs import InfoPoker
+from npc_gym.core.agent import HybridAgent, AgentConfig
+
+# Create environment
+env = npc_gym.make("InfoPoker-v1", source_text="Your text to decompose...")
+
+# Create agents
+agents = {}
+for player_id in env.player_ids:
+    config = AgentConfig(name=player_id, model="llama3.2", provider="ollama")
+    agents[player_id] = HybridAgent(config=config)
+
+# Run a game
+observations, info = env.reset()
+
+while True:
+    current_player = info["current_player"]
+    obs = observations[current_player]
+
+    response = agents[current_player].act(obs.to_dict())
+
+    action = npc_gym.Action(
+        player_id=current_player,
+        action_type=response.action_type,
+        reasoning=response.reasoning,
+    )
+
+    observations, rewards, terminated, truncated, info = env.step(action)
+
+    if terminated or truncated:
+        break
+
+print(f"Winner: {env.get_trace().winner}")
+```
+
+## Environments
+
+### InfoPoker (Partial Information Decomposition)
+Poker-style game where text is chunked into "cards" dealt to players. Players form hypotheses from partial information and bet based on confidence.
+
+```python
+from npc_gym.envs import InfoPoker, InfoPokerConfig
+
+config = InfoPokerConfig(
+    source_text="The quick brown fox...",
+    chunk_by="word",
+    num_judges=5,
+)
+
+env = InfoPoker(config=config, num_players=4)
+```
+
+### HypothesisBlackjack
+Blackjack-style game focused on concise inference. Players "hit" to get more info or "stand" with their hypothesis. Bust if hypothesis exceeds word limit.
+
+```python
+from npc_gym.envs import HypothesisBlackjack
+
+env = HypothesisBlackjack(
+    source_text="Complex problem description...",
+    num_players=3,
+)
+```
+
+### SynthesisTournament
+Multi-round debate tournament where ideas evolve through competition and synthesis.
+
+```python
+from npc_gym.envs import SynthesisTournament
+
+env = SynthesisTournament(
+    initial_topic="Should AI systems prioritize safety over capability?",
+    num_players=4,  # Must be power of 2
+)
+```
+
+## Training
+
+### Basic Training Loop
+
+```python
+from npc_gym.training import TrainingLoop, TrainingConfig
+from npc_gym.envs import InfoPoker
+from npc_gym.core.agent import HybridAgent
+
+config = TrainingConfig(
+    env_class=InfoPoker,
+    env_kwargs={"source_text": "Your training text..."},
+    agent_class=HybridAgent,
+    num_agents=4,
+    num_epochs=10,
+    games_per_epoch=100,
+)
+
+loop = TrainingLoop(config)
+loop.run()
+
+# Get best trained agent
+best_agent = loop.get_best_agent()
+```
+
+### Quick Training Helper
+
+```python
+from npc_gym.training import quick_train
+from npc_gym.envs import InfoPoker
+
+texts = [
+    "First training text...",
+    "Second training text...",
+    "Third training text...",
+]
+
+loop = quick_train(
+    env_class=InfoPoker,
+    source_texts=texts,
+    num_epochs=30,
+    games_per_epoch=50,
+)
+```
+
+## Architecture
+
+```
+npc-gym/
+├── npc_gym/
+│   ├── core/
+│   │   ├── env.py          # Base Environment class
+│   │   ├── spaces.py       # Action/observation spaces
+│   │   ├── info.py         # Information structures (PID)
+│   │   └── agent.py        # Agent classes (Hybrid, LLM, etc.)
+│   ├── envs/
+│   │   ├── card_game.py    # Base CardGame environment
+│   │   ├── info_poker.py   # InfoPoker (PID poker)
+│   │   ├── hypothesis_bj.py # HypothesisBlackjack
+│   │   └── synthesis.py    # SynthesisTournament
+│   └── training/
+│       ├── loop.py         # Main training orchestrator
+│       ├── traces.py       # Trace collection
+│       └── evolution.py    # Genetic model evolution
+```
+
+## Key Concepts
+
+### Partial Information Decomposition (PID)
+Text is chunked and distributed as "cards" - some private (hole cards), some public (community cards). Agents must infer the underlying meaning from incomplete information.
+
+### Hybrid System 1/2 Architecture
+Agents have:
+- **Model Genome**: Collection of specialized fine-tuned models with trigger patterns
+- **ResponseRouter**: Routes queries through fast path (System 1), ensemble, or full reasoning (System 2)
+
+### Genetic Evolution
+The model genome evolves through gameplay:
+1. Genes compete in games
+2. Fitness based on win rate and reward
+3. Selection, crossover, mutation
+4. Fine-tune winning genes' models
+
+## Integration with npcpy
+
+npc-gym builds on [npcpy](https://github.com/cagostino/npcpy) for:
+- LLM interactions (`get_llm_response`)
+- Fine-tuning (SFT, DPO via `npcpy.ft`)
+- Model ensembling (`npcpy.ft.model_ensembler`)
+- NPC agents (`npcpy.npc_compiler.NPC`)
+
+## License
+
+MIT

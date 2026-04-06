@@ -214,4 +214,4 @@ npc-gym builds on [npcpy](https://github.com/cagostino/npcpy):
 
 ## License
 
-MIT
+Apache 2.0

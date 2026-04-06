@@ -1,202 +1,216 @@
 # npc-gym
 
-A Gymnasium-style framework for training hybrid LLM+ML agents through games.
+A drop-in gymnasium replacement for training hybrid LLM+ML agents through games, RL environments, and neuroevolution.
 
-## Overview
+```python
+import npc_gym as gym
 
-npc-gym provides environments and training infrastructure for developing cognitive agents that combine:
+# Use npc-gym environments
+env = gym.make("SlimeVolley-v1")
+obs = env.reset()
+obs, reward, done, info = env.step([1, 0, 1])  # forward + jump
 
-- **System 1 (Fast)**: Pattern-matched responses from small fine-tuned models
-- **System 2 (Slow)**: Full LLM reasoning when uncertain
-
-The framework uses game-based training where agents learn through:
-1. Playing games with partial information
-2. Collecting traces (observations, actions, rewards)
-3. Fine-tuning specialized models (DPO, SFT)
-4. Evolving the model genome (genetic selection of best specialists)
-
-## Installation
+# Or use any existing gymnasium environment — falls through automatically
+env = gym.make("CartPole-v1")
+```
 
 ```bash
 pip install -e .
-
-# With visualization
-pip install -e ".[viz]"
-
-# Full training capabilities
-pip install -e ".[full]"
 ```
 
-## Quick Start
+## What's Included
 
+**Everything gymnasium has**, plus multi-agent games, partial information, LLM agents, and evolutionary training.
+
+### Spaces
 ```python
-import npc_gym
-from npc_gym.envs import InfoPoker
-from npc_gym.core.agent import HybridAgent, AgentConfig
+import npc_gym as gym
 
-# Create environment
-env = npc_gym.make("InfoPoker-v1", source_text="Your text to decompose...")
+gym.Box(-1, 1, shape=(12,))      # Continuous
+gym.Discrete(n=5)                 # Discrete
+gym.MultiBinary(3)                # Binary vectors
+gym.MultiDiscrete([3, 4, 5])      # Multi-dim discrete
+gym.Text(max_length=1024)         # Natural language
+gym.Dict({"obs": gym.Box(0, 1, shape=(4,)), "text": gym.Text()})
+```
 
-# Create agents
-agents = {}
-for player_id in env.player_ids:
-    config = AgentConfig(name=player_id, model="llama3.2", provider="ollama")
-    agents[player_id] = HybridAgent(config=config)
+### Wrappers
+```python
+env = gym.make("SlimeVolley-v1")
+env = gym.TimeLimit(env, max_episode_steps=3000)
+env = gym.ClipReward(env, min_r=-1, max_r=1)
+env = gym.FlattenObservation(env)
 
-# Run a game
-observations, info = env.reset()
+# Base classes for custom wrappers
+class MyWrapper(gym.ObservationWrapper):
+    def observation(self, obs):
+        return normalize(obs)
+```
 
-while True:
-    current_player = info["current_player"]
-    obs = observations[current_player]
+### Registration
+```python
+# Register custom environments
+gym.register("MyEnv-v0", entry_point="my_module:MyEnv", max_steps=1000)
+env = gym.make("MyEnv-v0")
 
-    response = agents[current_player].act(obs.to_dict())
-
-    action = npc_gym.Action(
-        player_id=current_player,
-        action_type=response.action_type,
-        reasoning=response.reasoning,
-    )
-
-    observations, rewards, terminated, truncated, info = env.step(action)
-
-    if terminated or truncated:
-        break
-
-print(f"Winner: {env.get_trace().winner}")
+# List all available
+print(gym.list_envs())
 ```
 
 ## Environments
 
-### InfoPoker (Partial Information Decomposition)
-Poker-style game where text is chunked into "cards" dealt to players. Players form hypotheses from partial information and bet based on confidence.
+### SlimeVolley-v1 — Physics-Based RL
+
+Direct port of hardmaru/slimevolleygym with identical physics, coordinate system, and baseline AI. Train agents via NEAT neuroevolution or any RL algorithm.
 
 ```python
-from npc_gym.envs import InfoPoker, InfoPokerConfig
+from npc_gym.envs.slime_volleyball import SlimeVolleyEnv, BaselinePolicy
+from npcpy.ft.neat import NEATEvolver, NEATConfig, NEATNetwork
+from npcpy.ft.engine import get_engine
 
-config = InfoPokerConfig(
-    source_text="The quick brown fox...",
-    chunk_by="word",
-    num_judges=5,
+# Play against the original 120-param RNN baseline
+env = SlimeVolleyEnv()  # default opponent = BaselinePolicy
+
+# Or self-play
+env = SlimeVolleyEnv(self_play=True)
+obs, reward, done, info = env.step(action_right, action_left)
+
+# Train with NEAT (npcpy) — specify compute backend
+evolver = NEATEvolver(
+    input_size=12, output_size=3,
+    config=NEATConfig(population_size=200),
+    engine="numpy",  # or "jax", "mlx", "cuda"
 )
 
-env = InfoPoker(config=config, num_players=4)
+def fitness(network):
+    obs = env.reset(); done = False; total = 0
+    while not done:
+        raw = network.activate(obs)
+        action = [1 if raw[i] > 0 else 0 for i in range(3)]
+        obs, reward, done, info = env.step(action)
+        total += reward
+    return total
+
+best_genome = evolver.run(fitness, generations=500)
 ```
 
-### HypothesisBlackjack
-Blackjack-style game focused on concise inference. Players "hit" to get more info or "stand" with their hypothesis. Bust if hypothesis exceeds word limit.
+### InfoPoker-v1 — Partial Information Decomposition
+
+Text chunked into "cards" dealt to players. Players form hypotheses from partial info and bet on confidence.
 
 ```python
-from npc_gym.envs import HypothesisBlackjack
-
-env = HypothesisBlackjack(
-    source_text="Complex problem description...",
-    num_players=3,
+env = gym.make("InfoPoker-v1",
+    source_text="The transformer architecture uses self-attention to process "
+                "sequences in parallel. Multi-head attention allows attending "
+                "to different representation subspaces...",
+    num_players=4,
 )
+observations, info = env.reset()
 ```
 
-### SynthesisTournament
-Multi-round debate tournament where ideas evolve through competition and synthesis.
+### More Environments
 
-```python
-from npc_gym.envs import SynthesisTournament
-
-env = SynthesisTournament(
-    initial_topic="Should AI systems prioritize safety over capability?",
-    num_players=4,  # Must be power of 2
-)
-```
+| Environment | Type | Description |
+|------------|------|-------------|
+| `SlimeVolley-v1` | Physics/RL | 2D volleyball, NEAT/RL training |
+| `InfoPoker-v1` | Multi-agent | Text decomposition poker |
+| `HypothesisBJ-v1` | Multi-agent | Hypothesis blackjack |
+| `Synthesis-v1` | Multi-agent | Debate tournament with synthesis |
+| `GridWorld-v1` | Navigation | Spatial nav with partial observability |
+| `Maze-v1` | Navigation | Limited-visibility maze |
+| `TicTacToe-v1` | Competitive | Classic board game |
+| `ConnectFour-v1` | Competitive | 7x6 board game |
+| `Pokemon-v1` | Emulator | Pokemon via PyBoy with vision |
 
 ## Training
 
-### Basic Training Loop
+### NEAT Neuroevolution (via npcpy)
+
+```python
+from npcpy.ft.neat import NEATEvolver, NEATConfig
+
+# Multi-backend: numpy, jax, mlx, cuda
+evolver = NEATEvolver(
+    input_size=12, output_size=3,
+    config=NEATConfig(
+        population_size=200,
+        add_node_rate=0.05,
+        add_connection_rate=0.08,
+        species_threshold=3.0,
+    ),
+    engine="mlx",  # Apple Silicon acceleration
+)
+
+best = evolver.run(fitness_fn, generations=500)
+```
+
+### Genetic Model Evolution
+
+Evolve ensembles of specialized LLM models through gameplay:
 
 ```python
 from npc_gym.training import TrainingLoop, TrainingConfig
-from npc_gym.envs import InfoPoker
-from npc_gym.core.agent import HybridAgent
 
 config = TrainingConfig(
     env_class=InfoPoker,
-    env_kwargs={"source_text": "Your training text..."},
+    env_kwargs={"source_text": corpus},
     agent_class=HybridAgent,
     num_agents=4,
     num_epochs=10,
     games_per_epoch=100,
 )
-
 loop = TrainingLoop(config)
 loop.run()
-
-# Get best trained agent
-best_agent = loop.get_best_agent()
 ```
 
-### Quick Training Helper
+### Trace Collection for DPO
+
+Games produce traces that convert to preference pairs for DPO fine-tuning:
 
 ```python
-from npc_gym.training import quick_train
-from npc_gym.envs import InfoPoker
-
-texts = [
-    "First training text...",
-    "Second training text...",
-    "Third training text...",
-]
-
-loop = quick_train(
-    env_class=InfoPoker,
-    source_texts=texts,
-    num_epochs=30,
-    games_per_epoch=50,
-)
+trace = env.get_trace()
+pairs = trace.to_preference_pairs(min_reward_gap=0.2)
+# [{"prompt": ..., "chosen": ..., "rejected": ..., "reward_gap": ...}]
 ```
 
 ## Architecture
 
 ```
-npc-gym/
-├── npc_gym/
-│   ├── core/
-│   │   ├── env.py          # Base Environment class
-│   │   ├── spaces.py       # Action/observation spaces
-│   │   ├── info.py         # Information structures (PID)
-│   │   └── agent.py        # Agent classes (Hybrid, LLM, etc.)
-│   ├── envs/
-│   │   ├── card_game.py    # Base CardGame environment
-│   │   ├── info_poker.py   # InfoPoker (PID poker)
-│   │   ├── hypothesis_bj.py # HypothesisBlackjack
-│   │   └── synthesis.py    # SynthesisTournament
-│   └── training/
-│       ├── loop.py         # Main training orchestrator
-│       ├── traces.py       # Trace collection
-│       └── evolution.py    # Genetic model evolution
+npc_gym/
+├── core/
+│   ├── env.py           # Base Environment (gymnasium-compatible)
+│   ├── spaces.py        # Box, Discrete, MultiBinary, MultiDiscrete, Text, Card, Deck
+│   ├── compat.py        # Gymnasium compatibility layer (make, register, wrappers)
+│   ├── info.py          # Information structures (PID)
+│   └── agent.py         # Agent classes (Random, LLM, Hybrid, NPC)
+├── envs/
+│   ├── slime_volleyball.py  # SlimeVolley with original physics + baseline AI
+│   ├── card_game.py         # Base card game
+│   ├── info_poker.py        # InfoPoker
+│   ├── hypothesis_bj.py     # HypothesisBlackjack
+│   ├── synthesis.py         # SynthesisTournament
+│   ├── grid_world.py        # GridWorld, Maze, ItemCollector
+│   ├── tictactoe.py         # TicTacToe, ConnectFour
+│   └── emulator/            # Game emulator environments
+├── training/
+│   ├── loop.py          # Training orchestrator
+│   ├── traces.py        # Trace collection
+│   └── evolution.py     # Genetic model evolution
+├── streaming/           # Real-time text processing
+├── analytics/           # Metrics and visualization
+└── rendering/           # Web visualization server
 ```
-
-## Key Concepts
-
-### Partial Information Decomposition (PID)
-Text is chunked and distributed as "cards" - some private (hole cards), some public (community cards). Agents must infer the underlying meaning from incomplete information.
-
-### Hybrid System 1/2 Architecture
-Agents have:
-- **Model Genome**: Collection of specialized fine-tuned models with trigger patterns
-- **ResponseRouter**: Routes queries through fast path (System 1), ensemble, or full reasoning (System 2)
-
-### Genetic Evolution
-The model genome evolves through gameplay:
-1. Genes compete in games
-2. Fitness based on win rate and reward
-3. Selection, crossover, mutation
-4. Fine-tune winning genes' models
 
 ## Integration with npcpy
 
-npc-gym builds on [npcpy](https://github.com/cagostino/npcpy) for:
-- LLM interactions (`get_llm_response`)
-- Fine-tuning (SFT, DPO via `npcpy.ft`)
-- Model ensembling (`npcpy.ft.model_ensembler`)
-- NPC agents (`npcpy.npc_compiler.NPC`)
+npc-gym builds on [npcpy](https://github.com/cagostino/npcpy):
+
+- **NEAT neuroevolution** (`npcpy.ft.neat`) — evolve neural network topologies
+- **Compute engines** (`npcpy.ft.engine`) — numpy, JAX, MLX, CUDA backends
+- **LLM interactions** (`npcpy.llm_funcs`) — multi-provider LLM calls
+- **NPCArray mixtures** (`npcpy.npc_array`) — ensemble inference, voting, consensus
+- **Fine-tuning** (`npcpy.ft`) — SFT, DPO, diffusion, genetic algorithms
+- **NPC agents** (`npcpy.npc_compiler`) — agent personas with tools and memory
 
 ## License
 

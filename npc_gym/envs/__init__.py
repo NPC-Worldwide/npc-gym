@@ -18,6 +18,7 @@ from npc_gym.envs.hypothesis_bj import HypothesisBlackjack
 from npc_gym.envs.synthesis import SynthesisTournament
 from npc_gym.envs.grid_world import GridWorld, GridWorldConfig, Maze, ItemCollector
 from npc_gym.envs.tictactoe import TicTacToe, ConnectFour
+from npc_gym.envs.slime_volleyball import SlimeVolleyEnv
 
 # Emulator environments (optional - may not have dependencies)
 from npc_gym.envs.emulator import EmulatorEnv, EmulatorConfig, VisionProcessor, VisionConfig
@@ -42,6 +43,8 @@ REGISTRY = {
     # Competitive board games
     "TicTacToe-v1": TicTacToe,
     "ConnectFour-v1": ConnectFour,
+    # Physics / RL
+    "SlimeVolley-v1": SlimeVolleyEnv,
     # Emulator environments
     "Emulator-v0": EmulatorEnv,
 }
@@ -65,6 +68,8 @@ __all__ = [
     # Competitive
     "TicTacToe",
     "ConnectFour",
+    # Physics / RL
+    "SlimeVolleyEnv",
     # Emulator
     "EmulatorEnv",
     "EmulatorConfig",

@@ -394,7 +394,6 @@ class SlimeVolleyEnv:
 
     def __init__(self, opponent=None, self_play=False):
         self.t = 0
-        self.t_limit = 3000
         self.self_play = self_play
 
         self.observation_size = 12
@@ -443,8 +442,6 @@ class SlimeVolleyEnv:
         obs = self.game.agent_right.getObservation()
 
         done = False
-        if self.t >= self.t_limit:
-            done = True
         if self.game.agent_left.life <= 0 or self.game.agent_right.life <= 0:
             done = True
 
@@ -476,6 +473,126 @@ class SlimeVolleyEnv:
             "net_height": REF_WALL_HEIGHT,
             "ground": REF_U,
         }
+
+    def render_frame(self, width=600, height=250) -> np.ndarray:
+        """
+        Render the current game state as a numpy RGB array.
+        Exact replica of slimevolleygym pixel rendering using cv2.
+        """
+        import cv2
+
+        # Colors — exact from slimevolleygym daytime mode
+        BACKGROUND_COLOR = (255, 255, 255)
+        AGENT_LEFT_COLOR = (240, 75, 0)
+        AGENT_RIGHT_COLOR = (0, 150, 255)
+        BALL_COLOR = (255, 200, 20)
+        FENCE_COLOR = (240, 210, 130)
+        GROUND_COLOR = (128, 227, 153)
+
+        FACTOR = width / REF_W
+
+        def toX(x):
+            return round((x + REF_W / 2) * FACTOR)
+
+        def toY(y):
+            return round(y * FACTOR)
+
+        def toP(x):
+            return round(x * FACTOR)
+
+        # Background
+        canvas = np.ones((height, width, 3), dtype=np.uint8)
+        for ch in range(3):
+            canvas[:, :, ch] = BACKGROUND_COLOR[ch]
+
+        # Ground
+        cv2.rectangle(canvas,
+            (0, height - toY(REF_U)),
+            (width, height),
+            GROUND_COLOR, thickness=-1, lineType=cv2.LINE_AA)
+
+        # Fence
+        fw = toP(REF_WALL_WIDTH)
+        fh = toP(REF_WALL_HEIGHT - 1.5)
+        fx = toX(0)
+        fy = height - toY(0.75 + REF_WALL_HEIGHT / 2)
+        cv2.rectangle(canvas,
+            (fx - fw // 2, fy - fh // 2),
+            (fx + fw // 2, fy + fh // 2),
+            FENCE_COLOR, thickness=-1, lineType=cv2.LINE_AA)
+
+        # Fence stub (top circle)
+        cv2.circle(canvas,
+            (toX(0), height - toY(REF_WALL_HEIGHT)),
+            toP(REF_WALL_WIDTH / 2),
+            FENCE_COLOR, thickness=-1, lineType=cv2.LINE_AA)
+
+        # Left agent (half circle)
+        al = self.game.agent_left
+        cv2.ellipse(canvas,
+            (toX(al.x), height - toY(al.y)),
+            (toP(al.r), toP(al.r)),
+            0, 0, -180,
+            AGENT_LEFT_COLOR, thickness=-1, lineType=cv2.LINE_AA)
+
+        # Left agent eye
+        eye_angle = math.pi * 60 / 180
+        ec = math.cos(eye_angle)
+        es = math.sin(eye_angle)
+        cv2.circle(canvas,
+            (toX(al.x + 0.6 * al.r * ec), height - toY(al.y + 0.6 * al.r * es)),
+            round(toP(al.r) * 0.3),
+            (255, 255, 255), thickness=-1, lineType=cv2.LINE_AA)
+        # Pupil tracks ball
+        bx_rel = self.game.ball.x - (al.x + 0.6 * al.r * ec)
+        by_rel = self.game.ball.y - (al.y + 0.6 * al.r * es)
+        dist = math.sqrt(bx_rel ** 2 + by_rel ** 2) or 1
+        cv2.circle(canvas,
+            (toX(al.x + 0.6 * al.r * ec + bx_rel / dist * 0.15 * al.r),
+             height - toY(al.y + 0.6 * al.r * es + by_rel / dist * 0.15 * al.r)),
+            round(toP(al.r) * 0.1),
+            (0, 0, 0), thickness=-1, lineType=cv2.LINE_AA)
+
+        # Right agent (half circle)
+        ar = self.game.agent_right
+        cv2.ellipse(canvas,
+            (toX(ar.x), height - toY(ar.y)),
+            (toP(ar.r), toP(ar.r)),
+            0, 0, -180,
+            AGENT_RIGHT_COLOR, thickness=-1, lineType=cv2.LINE_AA)
+
+        # Right agent eye
+        eye_angle_r = math.pi * 120 / 180
+        ecr = math.cos(eye_angle_r)
+        esr = math.sin(eye_angle_r)
+        cv2.circle(canvas,
+            (toX(ar.x + 0.6 * ar.r * ecr), height - toY(ar.y + 0.6 * ar.r * esr)),
+            round(toP(ar.r) * 0.3),
+            (255, 255, 255), thickness=-1, lineType=cv2.LINE_AA)
+        bx_rel2 = self.game.ball.x - (ar.x + 0.6 * ar.r * ecr)
+        by_rel2 = self.game.ball.y - (ar.y + 0.6 * ar.r * esr)
+        dist2 = math.sqrt(bx_rel2 ** 2 + by_rel2 ** 2) or 1
+        cv2.circle(canvas,
+            (toX(ar.x + 0.6 * ar.r * ecr + bx_rel2 / dist2 * 0.15 * ar.r),
+             height - toY(ar.y + 0.6 * ar.r * esr + by_rel2 / dist2 * 0.15 * ar.r)),
+            round(toP(ar.r) * 0.1),
+            (0, 0, 0), thickness=-1, lineType=cv2.LINE_AA)
+
+        # Ball
+        cv2.circle(canvas,
+            (toX(self.game.ball.x), height - toY(self.game.ball.y)),
+            toP(self.game.ball.r),
+            BALL_COLOR, thickness=-1, lineType=cv2.LINE_AA)
+
+        # Lives coins
+        for agent, direction in [(al, -1), (ar, 1)]:
+            for i in range(1, agent.life):
+                cx = toX(direction * (REF_W / 2 + 0.5 - i * 2.0))
+                cy = height - toY(1.5)
+                cv2.circle(canvas, (cx, cy), toP(0.5),
+                           FENCE_COLOR, thickness=-1, lineType=cv2.LINE_AA)
+
+        return canvas
 
     def close(self):
         pass
